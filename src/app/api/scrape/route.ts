@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { scrapeLatestNews } from "@/lib/scraper";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
-    const count = await scrapeLatestNews();
+    const body = await req.json().catch(() => ({}));
+    const section = body.section as "headline" | "popular" | "latest" | undefined;
+    const sections = section ? [section] : undefined;
+    const count = await scrapeLatestNews(sections);
     return NextResponse.json({
       success: true,
       message: `${count}개의 새 기사를 수집했습니다.`,

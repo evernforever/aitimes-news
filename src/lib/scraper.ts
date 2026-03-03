@@ -15,8 +15,10 @@ interface ScrapedArticle {
   section: "headline" | "popular" | "latest";
 }
 
-export async function scrapeLatestNews(): Promise<number> {
-  console.log("[Scraper] Starting scrape of aitimes.com...");
+export async function scrapeLatestNews(
+  sections: ("headline" | "popular" | "latest")[] = ["headline", "popular", "latest"]
+): Promise<number> {
+  console.log(`[Scraper] Starting scrape of aitimes.com... sections: ${sections.join(", ")}`);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -34,7 +36,7 @@ export async function scrapeLatestNews(): Promise<number> {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(2000);
 
-    const articles = await page.evaluate(() => {
+    const articles = await page.evaluate((sectionsList: string[]) => {
       const results: Array<{
         title: string;
         url: string;
@@ -71,64 +73,70 @@ export async function scrapeLatestNews(): Promise<number> {
         return Array.from(container.querySelectorAll("a[href]"));
       }
 
-      // ── 대표 헤드라인: #skin-1, 1개 ──
-      const featuredContainer = document.querySelector("#skin-1");
-      if (featuredContainer) {
-        const seen = new Set<string>();
-        for (const item of getItems(featuredContainer)) {
-          const link = extractLink(item);
-          if (link && !seen.has(link.url)) {
-            seen.add(link.url);
-            results.push({ ...link, section: "headline" });
-            break;
+      if (sectionsList.includes("headline")) {
+        // ── 대표 헤드라인: #skin-1, 1개 ──
+        const featuredContainer = document.querySelector("#skin-1");
+        if (featuredContainer) {
+          const seen = new Set<string>();
+          for (const item of getItems(featuredContainer)) {
+            const link = extractLink(item);
+            if (link && !seen.has(link.url)) {
+              seen.add(link.url);
+              results.push({ ...link, section: "headline" });
+              break;
+            }
+          }
+        }
+
+        // ── 헤드라인: #skin-8, 중복 URL 제거 후 7개 ──
+        const headlineContainer = document.querySelector("#skin-8");
+        if (headlineContainer) {
+          const seen = new Set(results.map(r => r.url));
+          for (const item of getItems(headlineContainer)) {
+            const link = extractLink(item);
+            if (link && !seen.has(link.url)) {
+              seen.add(link.url);
+              results.push({ ...link, section: "headline" });
+              if (results.filter(r => r.section === "headline").length >= 8) break;
+            }
           }
         }
       }
 
-      // ── 헤드라인: #skin-8, 중복 URL 제거 후 7개 ──
-      const headlineContainer = document.querySelector("#skin-8");
-      if (headlineContainer) {
-        const seen = new Set(results.map(r => r.url));
-        for (const item of getItems(headlineContainer)) {
-          const link = extractLink(item);
-          if (link && !seen.has(link.url)) {
-            seen.add(link.url);
-            results.push({ ...link, section: "headline" });
-            if (results.filter(r => r.section === "headline").length >= 8) break;
+      if (sectionsList.includes("popular")) {
+        // ── 인기기사: #skin-9, 중복 URL 제거 후 10개 ──
+        const popularContainer = document.querySelector("#skin-9");
+        if (popularContainer) {
+          const popularSeen = new Set(results.map(r => r.url));
+          for (const item of getItems(popularContainer)) {
+            const link = extractLink(item);
+            if (link && !popularSeen.has(link.url)) {
+              popularSeen.add(link.url);
+              results.push({ ...link, section: "popular" });
+              if (results.filter(r => r.section === "popular").length >= 10) break;
+            }
           }
         }
       }
 
-      // ── 인기기사: #skin-9, 중복 URL 제거 후 10개 ──
-      const popularContainer = document.querySelector("#skin-9");
-      if (popularContainer) {
-        const popularSeen = new Set(results.map(r => r.url));
-        for (const item of getItems(popularContainer)) {
-          const link = extractLink(item);
-          if (link && !popularSeen.has(link.url)) {
-            popularSeen.add(link.url);
-            results.push({ ...link, section: "popular" });
-            if (results.filter(r => r.section === "popular").length >= 10) break;
-          }
-        }
-      }
-
-      // ── 최신기사: #skin-10, 중복 URL 제거 후 10개 ──
-      const latestContainer = document.querySelector("#skin-10");
-      if (latestContainer) {
-        const latestSeen = new Set(results.map(r => r.url));
-        for (const item of getItems(latestContainer)) {
-          const link = extractLink(item);
-          if (link && !latestSeen.has(link.url)) {
-            latestSeen.add(link.url);
-            results.push({ ...link, section: "latest" });
-            if (results.filter(r => r.section === "latest").length >= 10) break;
+      if (sectionsList.includes("latest")) {
+        // ── 최신기사: #skin-10, 중복 URL 제거 후 10개 ──
+        const latestContainer = document.querySelector("#skin-10");
+        if (latestContainer) {
+          const latestSeen = new Set(results.map(r => r.url));
+          for (const item of getItems(latestContainer)) {
+            const link = extractLink(item);
+            if (link && !latestSeen.has(link.url)) {
+              latestSeen.add(link.url);
+              results.push({ ...link, section: "latest" });
+              if (results.filter(r => r.section === "latest").length >= 10) break;
+            }
           }
         }
       }
 
       return results;
-    });
+    }, sections);
 
     const headlineCount = articles.filter(a => a.section === "headline").length;
     const popularCount = articles.filter(a => a.section === "popular").length;

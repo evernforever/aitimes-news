@@ -10,7 +10,8 @@ export default function Home() {
   const [scraping, setScraping] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [message, setMessage] = useState("");
-  const [filter, setFilter] = useState("전체");
+  const [filter, setFilter] = useState("헤드라인");
+  const [categoryLoading, setCategoryLoading] = useState<string | null>(null);
 
   // 텍스트 선택 팝업
   const [popup, setPopup] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -108,14 +109,16 @@ export default function Home() {
 
   const handleScrape = async () => {
     setScraping(true);
-    setMessage("");
     const start = Date.now();
     try {
       const res = await fetch("/api/scrape", { method: "POST" });
       const data = await res.json();
       const elapsed = Math.round((Date.now() - start) / 1000);
       setMessage(`${data.message || data.error} (소요시간: ${elapsed}초)`);
-      if (data.success) await fetchArticles();
+      if (data.success) {
+        await fetchArticles();
+        setFilter("헤드라인");
+      }
     } catch {
       setMessage("스크래핑 중 오류가 발생했습니다.");
     } finally {
@@ -134,7 +137,10 @@ export default function Home() {
       const data = await res.json();
       const elapsed = Math.round((Date.now() - start) / 1000);
       setMessage(`${data.message || data.error} (소요시간: ${elapsed}초)`);
-      if (data.success) await fetchArticles();
+      if (data.success) {
+        await fetchArticles();
+        setFilter("헤드라인");
+      }
     } catch {
       setMessage("초기화 중 오류가 발생했습니다.");
     } finally {
@@ -142,12 +148,65 @@ export default function Home() {
     }
   };
 
-  // 카테고리 목록 추출 (고정 순서: 전체 → 헤드라인 → 인기기사 → 최신기사)
-  const CATEGORY_FIXED_ORDER = ["전체", "헤드라인", "인기기사", "최신기사"];
-  const existingCategories = new Set(articles.map((a) => a.category).filter(Boolean) as string[]);
-  const categories = CATEGORY_FIXED_ORDER.filter(
-    (c) => c === "전체" || existingCategories.has(c)
-  );
+  const fetchSection = async (section: "popular" | "latest") => {
+    const res = await fetch("/api/scrape", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section }),
+    });
+    return res.json();
+  };
+
+  const handleCategoryClick = async (cat: string) => {
+    setFilter(cat);
+
+    if (cat === "전체") {
+      const missingSections: ("popular" | "latest")[] = [];
+      if (!articles.some((a) => a.category === "인기기사")) missingSections.push("popular");
+      if (!articles.some((a) => a.category === "최신기사")) missingSections.push("latest");
+      if (missingSections.length === 0) return;
+
+      setCategoryLoading("전체");
+      const start = Date.now();
+      try {
+        let totalCount = 0;
+        for (const section of missingSections) {
+          const data = await fetchSection(section);
+          totalCount += data.count ?? 0;
+        }
+        const elapsed = Math.round((Date.now() - start) / 1000);
+        setMessage(`누락된 기사 총 ${totalCount}개를 수집했습니다. (소요시간: ${elapsed}초)`);
+        await fetchArticles();
+      } catch {
+        setMessage("기사를 불러오는 중 오류가 발생했습니다.");
+      } finally {
+        setCategoryLoading(null);
+      }
+      return;
+    }
+
+    if (cat === "인기기사" || cat === "최신기사") {
+      const hasArticles = articles.some((a) => a.category === cat);
+      if (!hasArticles) {
+        const section = cat === "인기기사" ? "popular" : "latest";
+        setCategoryLoading(cat);
+        const start = Date.now();
+        try {
+          const data = await fetchSection(section);
+          const elapsed = Math.round((Date.now() - start) / 1000);
+          setMessage(`${data.message || data.error} (소요시간: ${elapsed}초)`);
+          await fetchArticles();
+        } catch {
+          setMessage(`${cat} 기사를 불러오는 중 오류가 발생했습니다.`);
+        } finally {
+          setCategoryLoading(null);
+        }
+      }
+    }
+  };
+
+  // 카테고리 버튼 (헤드라인 → 인기기사 → 최신기사 → 전체, 항상 표시)
+  const CATEGORY_BUTTONS = ["헤드라인", "인기기사", "최신기사", "전체"];
 
   // 필터링
   const filtered =
@@ -235,19 +294,28 @@ export default function Home() {
       </header>
 
       {/* 카테고리 필터 */}
-      {categories.length > 1 && (
+      {articles.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6">
-          {categories.map((cat) => (
+          {CATEGORY_BUTTONS.map((cat) => (
             <button
               key={cat}
-              onClick={() => setFilter(cat)}
-              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+              onClick={() => handleCategoryClick(cat)}
+              disabled={categoryLoading === cat}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors ${
                 filter === cat
                   ? "bg-blue-600 text-white"
                   : "bg-white text-gray-600 border border-gray-300 hover:border-blue-400"
-              }`}
+              } disabled:opacity-60`}
             >
-              {cat}
+              {categoryLoading === cat ? (
+                <>
+                  <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  로딩 중...
+                </>
+              ) : cat}
             </button>
           ))}
         </div>
