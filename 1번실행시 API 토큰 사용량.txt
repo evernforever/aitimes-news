@@ -3,3 +3,11 @@ Total tokens in
 69,969
 Total tokens out
 13,303
+
+------------------
+헤드라인 인기기사만 17개 호출 후
+0.66 달러
+Total tokens in
+114,862
+Total tokens out
+21,091
