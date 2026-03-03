@@ -116,7 +116,7 @@ export async function scrapeLatestNews(): Promise<number> {
         const newArticle: Omit<Article, "id"> = {
           title: article.title,
           url: article.url,
-          category: article.category ?? (article.section === "popular" ? "인기기사" : null),
+          category: article.category ?? (article.section === "popular" ? "인기기사" : "헤드라인"),
           content,
           summary: null,
           keywords: null,

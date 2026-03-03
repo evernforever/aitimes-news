@@ -247,7 +247,7 @@ function ArticleCard({ article }: { article: Article }) {
 
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
         <span className="text-xs text-gray-400">
-          {article.published_at || "날짜 미상"}
+          {article.published_at || new Date(article.fetched_at).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}
         </span>
         <a
           href={article.url}
