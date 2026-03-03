@@ -64,13 +64,19 @@ export async function scrapeLatestNews(): Promise<number> {
         return { title, url: href, category, published_at };
       }
 
+      // 컨테이너에서 기사 단위 요소 목록 반환 (li가 있으면 li 순회, 없으면 a[href] 순회)
+      function getItems(container: Element): Element[] {
+        const lis = Array.from(container.querySelectorAll("li"));
+        if (lis.length >= 2) return lis;
+        return Array.from(container.querySelectorAll("a[href]"));
+      }
+
       // ── 대표 헤드라인: #skin-1, 1개 ──
       const featuredContainer = document.querySelector("#skin-1");
       if (featuredContainer) {
         const seen = new Set<string>();
-        const links = featuredContainer.querySelectorAll("a[href]");
-        for (const a of Array.from(links)) {
-          const link = extractLink(a);
+        for (const item of getItems(featuredContainer)) {
+          const link = extractLink(item);
           if (link && !seen.has(link.url)) {
             seen.add(link.url);
             results.push({ ...link, section: "headline" });
@@ -79,13 +85,12 @@ export async function scrapeLatestNews(): Promise<number> {
         }
       }
 
-      // ── 헤드라인: #skin-8 (.auto-article), 중복 URL 제거 후 7개 ──
+      // ── 헤드라인: #skin-8, 중복 URL 제거 후 7개 ──
       const headlineContainer = document.querySelector("#skin-8");
       if (headlineContainer) {
         const seen = new Set(results.map(r => r.url));
-        const links = headlineContainer.querySelectorAll("a[href]");
-        for (const a of Array.from(links)) {
-          const link = extractLink(a);
+        for (const item of getItems(headlineContainer)) {
+          const link = extractLink(item);
           if (link && !seen.has(link.url)) {
             seen.add(link.url);
             results.push({ ...link, section: "headline" });
@@ -94,13 +99,12 @@ export async function scrapeLatestNews(): Promise<number> {
         }
       }
 
-      // ── 인기기사: #skin-9 (.auto-article), 중복 URL 제거 후 10개 ─
+      // ── 인기기사: #skin-9, 중복 URL 제거 후 10개 ──
       const popularContainer = document.querySelector("#skin-9");
       if (popularContainer) {
         const popularSeen = new Set(results.map(r => r.url));
-        const links = popularContainer.querySelectorAll("a[href]");
-        for (const a of Array.from(links)) {
-          const link = extractLink(a);
+        for (const item of getItems(popularContainer)) {
+          const link = extractLink(item);
           if (link && !popularSeen.has(link.url)) {
             popularSeen.add(link.url);
             results.push({ ...link, section: "popular" });
@@ -113,9 +117,8 @@ export async function scrapeLatestNews(): Promise<number> {
       const latestContainer = document.querySelector("#skin-10");
       if (latestContainer) {
         const latestSeen = new Set(results.map(r => r.url));
-        const links = latestContainer.querySelectorAll("a[href]");
-        for (const a of Array.from(links)) {
-          const link = extractLink(a);
+        for (const item of getItems(latestContainer)) {
+          const link = extractLink(item);
           if (link && !latestSeen.has(link.url)) {
             latestSeen.add(link.url);
             results.push({ ...link, section: "latest" });
@@ -215,8 +218,10 @@ export async function scrapeTestArticle(): Promise<number> {
 
       const container = document.querySelector("#skin-1");
       if (!container) return null;
-      for (const a of Array.from(container.querySelectorAll("a[href]"))) {
-        const link = extractLink(a);
+      const lis = Array.from(container.querySelectorAll("li"));
+      const items = lis.length >= 1 ? lis : Array.from(container.querySelectorAll("a[href]"));
+      for (const item of items) {
+        const link = extractLink(item);
         if (link) return link;
       }
       return null;
