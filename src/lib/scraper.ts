@@ -155,8 +155,8 @@ export async function scrapeLatestNews(): Promise<number> {
       return { content, published_at: articlePublishedAt, summary, keywords };
     }
 
-    // 5개씩 병렬 처리 (순서 보존을 위해 배치 내 결과를 순차 삽입)
-    const CONCURRENCY = 5;
+    // 10개씩 병렬 처리 (순서 보존을 위해 배치 내 결과를 순차 삽입)
+    const CONCURRENCY = 10;
     const reversed = [...newArticles].reverse();
 
     for (let i = 0; i < reversed.length; i += CONCURRENCY) {

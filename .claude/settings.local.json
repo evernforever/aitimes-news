@@ -6,7 +6,8 @@
       "Bash(npm install next@latest)",
       "Bash(npx playwright install chromium)",
       "Bash(npx tsc --noEmit)",
-      "WebFetch(domain:www.aitimes.com)"
+      "WebFetch(domain:www.aitimes.com)",
+      "WebFetch(domain:docs.anthropic.com)"
     ]
   }
 }
