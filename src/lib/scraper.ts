@@ -64,17 +64,32 @@ export async function scrapeLatestNews(): Promise<number> {
         return { title, url: href, category, published_at };
       }
 
+      // ── 대표 헤드라인: #skin-1, 1개 ──
+      const featuredContainer = document.querySelector("#skin-1");
+      if (featuredContainer) {
+        const seen = new Set<string>();
+        const links = featuredContainer.querySelectorAll("a[href]");
+        for (const a of Array.from(links)) {
+          const link = extractLink(a);
+          if (link && !seen.has(link.url)) {
+            seen.add(link.url);
+            results.push({ ...link, section: "headline" });
+            break;
+          }
+        }
+      }
+
       // ── 헤드라인: #skin-8 (.auto-article), 중복 URL 제거 후 7개 ──
       const headlineContainer = document.querySelector("#skin-8");
       if (headlineContainer) {
-        const seen = new Set<string>();
+        const seen = new Set(results.map(r => r.url));
         const links = headlineContainer.querySelectorAll("a[href]");
         for (const a of Array.from(links)) {
           const link = extractLink(a);
           if (link && !seen.has(link.url)) {
             seen.add(link.url);
             results.push({ ...link, section: "headline" });
-            if (results.filter(r => r.section === "headline").length >= 7) break;
+            if (results.filter(r => r.section === "headline").length >= 8) break;
           }
         }
       }
