@@ -108,7 +108,7 @@ export async function scrapeLatestNews(): Promise<number> {
     const newArticles = articles.filter((a) => !existingUrls.has(a.url));
     console.log(`[Scraper] ${newArticles.length} new articles to process`);
 
-    for (const article of newArticles) {
+    for (const article of [...newArticles].reverse()) {
       try {
         const content = await fetchArticleContent(context, article.url);
         const now = new Date().toISOString();

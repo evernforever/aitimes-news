@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { Article } from "@/types";
 
@@ -11,6 +11,83 @@ export default function Home() {
   const [resetting, setResetting] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("전체");
+
+  // 텍스트 선택 팝업
+  const [popup, setPopup] = useState<{ x: number; y: number; text: string } | null>(null);
+
+  // 설명 모달
+  const [modal, setModal] = useState<{ text: string; explanation: string; loading: boolean } | null>(null);
+
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // 텍스트 드래그 감지
+  useEffect(() => {
+    const handleMouseUp = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("#ask-claude-popup")) return;
+
+      const selection = window.getSelection();
+      const text = selection?.toString().trim();
+
+      if (!text || text.length < 2) {
+        setPopup(null);
+        return;
+      }
+
+      if (!contentRef.current?.contains(e.target as Node)) {
+        setPopup(null);
+        return;
+      }
+
+      setPopup({ x: e.clientX, y: e.clientY, text });
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("#ask-claude-popup")) {
+        setPopup(null);
+      }
+    };
+
+    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, []);
+
+  const handleAskClaude = useCallback(async () => {
+    if (!popup) return;
+    const selectedText = popup.text;
+    setPopup(null);
+    window.getSelection()?.removeAllRanges();
+
+    setModal({ text: selectedText, explanation: "", loading: true });
+
+    try {
+      const res = await fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selectedText, articleTitle: "AI Times 뉴스" }),
+      });
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let explanation = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        explanation += decoder.decode(value, { stream: true });
+        setModal((prev) => prev ? { ...prev, explanation, loading: false } : null);
+      }
+    } catch {
+      setModal((prev) =>
+        prev ? { ...prev, explanation: "설명을 불러오는 중 오류가 발생했습니다.", loading: false } : null
+      );
+    }
+  }, [popup]);
 
   const fetchArticles = useCallback(async () => {
     setLoading(true);
@@ -88,6 +165,7 @@ export default function Home() {
   }, {});
 
   return (
+    <>
     <div className="max-w-4xl mx-auto px-4 py-8">
       {/* 헤더 */}
       <header className="mb-8">
@@ -164,8 +242,26 @@ export default function Home() {
         </div>
       )}
 
+      {/* 재수집 진행 배너 */}
+      {resetting && (
+        <div className="flex flex-col items-center justify-center py-20 gap-5">
+          <div className="relative">
+            <svg className="animate-spin h-16 w-16 text-blue-200" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            </svg>
+            <svg className="animate-spin h-16 w-16 text-blue-500 absolute inset-0" style={{ animationDuration: "0.8s" }} viewBox="0 0 24 24" fill="none">
+              <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-semibold text-gray-800">재수집 중입니다...</p>
+            <p className="text-sm text-gray-500 mt-1">기사를 가져오고 AI 요약을 생성하고 있습니다. 잠시만 기다려 주세요.</p>
+          </div>
+        </div>
+      )}
+
       {/* 로딩 */}
-      {loading && (
+      {loading && !resetting && (
         <div className="text-center py-20 text-gray-500">
           <svg className="animate-spin h-8 w-8 mx-auto mb-2 text-blue-500" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -176,7 +272,7 @@ export default function Home() {
       )}
 
       {/* 빈 상태 */}
-      {!loading && filtered.length === 0 && (
+      {!loading && !resetting && filtered.length === 0 && (
         <div className="text-center py-20">
           <p className="text-gray-400 text-lg mb-4">수집된 뉴스가 없습니다</p>
           <p className="text-gray-400 text-sm mb-6">
@@ -189,20 +285,98 @@ export default function Home() {
       )}
 
       {/* 뉴스 목록 */}
-      {!loading &&
-        Object.entries(grouped).map(([date, dateArticles]) => (
-          <section key={date} className="mb-8">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-200 pb-2">
-              {date} · {dateArticles.length}건
-            </h2>
-            <div className="space-y-4">
-              {dateArticles.map((article) => (
-                <ArticleCard key={article.id} article={article} />
-              ))}
-            </div>
-          </section>
-        ))}
+      <div ref={contentRef}>
+        {!loading && !resetting &&
+          Object.entries(grouped).map(([date, dateArticles]) => (
+            <section key={date} className="mb-8">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-200 pb-2">
+                {date} · {dateArticles.length}건
+              </h2>
+              <div className="space-y-4">
+                {dateArticles.map((article) => (
+                  <ArticleCard key={article.id} article={article} />
+                ))}
+              </div>
+            </section>
+          ))}
+      </div>
+
+      <p className="text-xs text-gray-400 mt-4 text-center">
+        텍스트를 드래그하면 Claude에게 설명을 요청할 수 있습니다
+      </p>
     </div>
+
+    {/* 드래그 팝업 */}
+    {popup && (
+      <div
+        id="ask-claude-popup"
+        style={{
+          position: "fixed",
+          top: popup.y - 48,
+          left: popup.x - 60,
+          zIndex: 50,
+        }}
+      >
+        <button
+          onClick={handleAskClaude}
+          className="flex items-center gap-1.5 bg-gray-900 hover:bg-gray-700 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg whitespace-nowrap transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4M12 8h.01" />
+          </svg>
+          클로드에 물어보기
+        </button>
+      </div>
+    )}
+
+    {/* 설명 모달 */}
+    {modal && (
+      <div
+        className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) setModal(null); }}
+      >
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Claude AI</span>
+              <span className="text-sm font-medium text-gray-700">설명</span>
+            </div>
+            <button onClick={() => setModal(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          </div>
+
+          <div className="px-5 py-4">
+            <div className="bg-gray-50 rounded-lg px-3 py-2 mb-4 text-sm text-gray-600 border-l-4 border-blue-300 italic line-clamp-2">
+              "{modal.text}"
+            </div>
+
+            <div className="text-sm text-gray-800 leading-relaxed min-h-[80px]">
+              {modal.loading ? (
+                <div className="flex items-center gap-2 text-gray-400">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  설명 생성 중...
+                </div>
+              ) : (
+                modal.explanation
+              )}
+            </div>
+          </div>
+
+          <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
+            <button
+              onClick={() => setModal(null)}
+              className="text-sm text-gray-500 hover:text-gray-700 px-4 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
