@@ -9,7 +9,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [testScraping, setTestScraping] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("전체");
 
@@ -110,10 +109,12 @@ export default function Home() {
   const handleScrape = async () => {
     setScraping(true);
     setMessage("");
+    const start = Date.now();
     try {
       const res = await fetch("/api/scrape", { method: "POST" });
       const data = await res.json();
-      setMessage(data.message || data.error);
+      const elapsed = Math.round((Date.now() - start) / 1000);
+      setMessage(`${data.message || data.error} (소요시간: ${elapsed}초)`);
       if (data.success) await fetchArticles();
     } catch {
       setMessage("스크래핑 중 오류가 발생했습니다.");
@@ -122,32 +123,17 @@ export default function Home() {
     }
   };
 
-  const handleTestScrape = async () => {
-    if (!confirm("DB를 초기화하고 헤드라인 첫 기사 1개만 테스트 수집할까요?")) return;
-    setTestScraping(true);
-    setMessage("");
-    setArticles([]);
-    try {
-      const res = await fetch("/api/scrape-test", { method: "POST" });
-      const data = await res.json();
-      setMessage(data.message || data.error);
-      if (data.success) await fetchArticles();
-    } catch {
-      setMessage("테스트 수집 중 오류가 발생했습니다.");
-    } finally {
-      setTestScraping(false);
-    }
-  };
-
   const handleReset = async () => {
     if (!confirm("저장된 뉴스를 모두 삭제하고 다시 수집할까요?")) return;
     setResetting(true);
     setMessage("");
     setArticles([]);
+    const start = Date.now();
     try {
       const res = await fetch("/api/reset", { method: "POST" });
       const data = await res.json();
-      setMessage(data.message || data.error);
+      const elapsed = Math.round((Date.now() - start) / 1000);
+      setMessage(`${data.message || data.error} (소요시간: ${elapsed}초)`);
       if (data.success) await fetchArticles();
     } catch {
       setMessage("초기화 중 오류가 발생했습니다.");
@@ -205,25 +191,8 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleTestScrape}
-              disabled={scraping || resetting || testScraping}
-              className="flex items-center gap-2 bg-gray-100 hover:bg-yellow-50 hover:text-yellow-700 disabled:opacity-40 text-gray-600 border border-gray-300 hover:border-yellow-400 px-4 py-2 rounded-lg font-medium transition-colors text-sm"
-            >
-              {testScraping ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  테스트 중...
-                </>
-              ) : (
-                "헤드라인 테스트 재수집"
-              )}
-            </button>
-            <button
               onClick={handleReset}
-              disabled={scraping || resetting || testScraping}
+              disabled={scraping || resetting}
               className="flex items-center gap-2 bg-gray-100 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 text-gray-600 border border-gray-300 hover:border-red-300 px-4 py-2 rounded-lg font-medium transition-colors text-sm"
             >
               {resetting ? (
@@ -240,7 +209,7 @@ export default function Home() {
             </button>
             <button
               onClick={handleScrape}
-              disabled={scraping || resetting || testScraping}
+              disabled={scraping || resetting}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm"
             >
               {scraping ? (

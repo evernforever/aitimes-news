@@ -142,9 +142,35 @@ export async function scrapeLatestNews(): Promise<number> {
     const newArticles = articles.filter((a) => !existingUrls.has(a.url));
     console.log(`[Scraper] ${newArticles.length} new articles to process`);
 
-    for (const article of [...newArticles].reverse()) {
-      try {
-        const { content, published_at: articlePublishedAt } = await fetchArticleContent(context, article.url);
+    // 기사 1건: 본문 가져오기 + 요약을 동시에 처리
+    async function processOneArticle(article: ScrapedArticle) {
+      const { content, published_at: articlePublishedAt } = await fetchArticleContent(context, article.url);
+      let summary = "";
+      let keywords: string[] = [];
+      if (content && content.length > 100) {
+        const result = await summarizeArticle(article.title, content);
+        summary = result.summary;
+        keywords = result.keywords;
+      }
+      return { content, published_at: articlePublishedAt, summary, keywords };
+    }
+
+    // 5개씩 병렬 처리 (순서 보존을 위해 배치 내 결과를 순차 삽입)
+    const CONCURRENCY = 5;
+    const reversed = [...newArticles].reverse();
+
+    for (let i = 0; i < reversed.length; i += CONCURRENCY) {
+      const batch = reversed.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(batch.map(a => processOneArticle(a)));
+
+      for (let j = 0; j < batch.length; j++) {
+        const article = batch[j];
+        const result = results[j];
+        if (result.status === "rejected") {
+          console.error(`[Scraper] Failed: ${article.url}`, result.reason);
+          continue;
+        }
+        const { content, published_at: articlePublishedAt, summary, keywords } = result.value;
         const now = new Date().toISOString();
 
         const newArticle: Omit<Article, "id"> = {
@@ -156,24 +182,16 @@ export async function scrapeLatestNews(): Promise<number> {
             "헤드라인"
           ),
           content,
-          summary: null,
-          keywords: null,
+          summary: summary || null,
+          keywords: keywords.length > 0 ? keywords : null,
           published_at: articlePublishedAt || article.published_at,
           fetched_at: now,
         };
 
         insertArticle(newArticle);
-
-        if (content && content.length > 100) {
-          const { summary, keywords } = await summarizeArticle(article.title, content);
-          updateSummary(article.url, summary, keywords);
-        }
-
+        if (summary) updateSummary(article.url, summary, keywords);
         newCount++;
         console.log(`[Scraper][${article.section}] ${article.title.slice(0, 50)}...`);
-        await new Promise((r) => setTimeout(r, 1500));
-      } catch (err) {
-        console.error(`[Scraper] Failed: ${article.url}`, err);
       }
     }
   } finally {
@@ -317,7 +335,7 @@ async function fetchArticleContent(context: BrowserContext, url: string): Promis
   const page = await context.newPage();
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(500);
 
     const result = await page.evaluate(() => {
       // published_at 추출: "입력 YYYY.MM.DD HH:MM" 패턴을 페이지 전체 텍스트에서 탐색
