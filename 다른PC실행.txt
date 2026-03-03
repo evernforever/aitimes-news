@@ -1,0 +1,9 @@
+다른 컴퓨터에서 받아서 실행하는 방법 (나중에 참고)
+
+git clone https://github.com/evernforever/aitimes-news.git
+cd aitimes-news
+npm install
+npx playwright install chromium
+# .env.local 파일 생성 후 ANTHROPIC_API_KEY 입력
+npm run dev
+주의: .env.local은 .gitignore로 GitHub에 올라가지 않으므로, 다른 기기에서 클론할 때 직접 API 키를 다시 설정해야 합니다.
