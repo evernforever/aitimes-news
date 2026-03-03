@@ -138,10 +138,13 @@ export default function ArticlePage() {
           <div className="flex items-center gap-3 text-sm text-gray-500 mb-6">
             <span>
               {article.published_at ||
-                new Date(article.fetched_at).toLocaleDateString("ko-KR", {
+                new Date(article.fetched_at).toLocaleString("ko-KR", {
                   year: "numeric",
                   month: "long",
                   day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
                 })}
             </span>
             <a href={article.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">

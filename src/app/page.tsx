@@ -9,6 +9,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [testScraping, setTestScraping] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("전체");
 
@@ -121,6 +122,23 @@ export default function Home() {
     }
   };
 
+  const handleTestScrape = async () => {
+    if (!confirm("DB를 초기화하고 헤드라인 첫 기사 1개만 테스트 수집할까요?")) return;
+    setTestScraping(true);
+    setMessage("");
+    setArticles([]);
+    try {
+      const res = await fetch("/api/scrape-test", { method: "POST" });
+      const data = await res.json();
+      setMessage(data.message || data.error);
+      if (data.success) await fetchArticles();
+    } catch {
+      setMessage("테스트 수집 중 오류가 발생했습니다.");
+    } finally {
+      setTestScraping(false);
+    }
+  };
+
   const handleReset = async () => {
     if (!confirm("저장된 뉴스를 모두 삭제하고 다시 수집할까요?")) return;
     setResetting(true);
@@ -138,19 +156,20 @@ export default function Home() {
     }
   };
 
-  // 카테고리 목록 추출
-  const categories = [
-    "전체",
-    ...Array.from(
-      new Set(articles.map((a) => a.category).filter(Boolean) as string[])
-    ),
-  ];
+  // 카테고리 목록 추출 (고정 순서: 전체 → 헤드라인 → 인기기사 → 최신기사)
+  const CATEGORY_FIXED_ORDER = ["전체", "헤드라인", "인기기사", "최신기사"];
+  const existingCategories = new Set(articles.map((a) => a.category).filter(Boolean) as string[]);
+  const categories = CATEGORY_FIXED_ORDER.filter(
+    (c) => c === "전체" || existingCategories.has(c)
+  );
 
   // 필터링
   const filtered =
     filter === "전체" ? articles : articles.filter((a) => a.category === filter);
 
-  // 날짜별 그룹핑
+  // 날짜별 그룹핑 후 그룹 내 카테고리 순 정렬 (헤드라인 → 인기기사 → 최신기사)
+  const CATEGORY_ORDER: Record<string, number> = { "헤드라인": 0, "인기기사": 1, "최신기사": 2 };
+
   const grouped = filtered.reduce<Record<string, Article[]>>((acc, article) => {
     const date = article.fetched_at
       ? new Date(article.fetched_at).toLocaleDateString("ko-KR", {
@@ -163,6 +182,12 @@ export default function Home() {
     acc[date].push(article);
     return acc;
   }, {});
+
+  Object.values(grouped).forEach((group) => {
+    group.sort((a, b) =>
+      (CATEGORY_ORDER[a.category ?? ""] ?? 99) - (CATEGORY_ORDER[b.category ?? ""] ?? 99)
+    );
+  });
 
   return (
     <>
@@ -180,8 +205,25 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={handleTestScrape}
+              disabled={scraping || resetting || testScraping}
+              className="flex items-center gap-2 bg-gray-100 hover:bg-yellow-50 hover:text-yellow-700 disabled:opacity-40 text-gray-600 border border-gray-300 hover:border-yellow-400 px-4 py-2 rounded-lg font-medium transition-colors text-sm"
+            >
+              {testScraping ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  테스트 중...
+                </>
+              ) : (
+                "헤드라인 테스트 재수집"
+              )}
+            </button>
+            <button
               onClick={handleReset}
-              disabled={scraping || resetting}
+              disabled={scraping || resetting || testScraping}
               className="flex items-center gap-2 bg-gray-100 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 text-gray-600 border border-gray-300 hover:border-red-300 px-4 py-2 rounded-lg font-medium transition-colors text-sm"
             >
               {resetting ? (
@@ -198,7 +240,7 @@ export default function Home() {
             </button>
             <button
               onClick={handleScrape}
-              disabled={scraping || resetting}
+              disabled={scraping || resetting || testScraping}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm"
             >
               {scraping ? (
@@ -421,7 +463,7 @@ function ArticleCard({ article }: { article: Article }) {
 
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
         <span className="text-xs text-gray-400">
-          {article.published_at || new Date(article.fetched_at).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}
+          {article.published_at || new Date(article.fetched_at).toLocaleString("ko-KR", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
         </span>
         <a
           href={article.url}

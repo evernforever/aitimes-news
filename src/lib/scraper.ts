@@ -12,7 +12,7 @@ interface ScrapedArticle {
   url: string;
   category: string | null;
   published_at: string | null;
-  section: "headline" | "popular";
+  section: "headline" | "popular" | "latest";
 }
 
 export async function scrapeLatestNews(): Promise<number> {
@@ -40,7 +40,7 @@ export async function scrapeLatestNews(): Promise<number> {
         url: string;
         category: string | null;
         published_at: string | null;
-        section: "headline" | "popular";
+        section: "headline" | "popular" | "latest";
       }> = [];
 
       function extractLink(el: Element): { title: string; url: string; category: string | null; published_at: string | null } | null {
@@ -109,12 +109,28 @@ export async function scrapeLatestNews(): Promise<number> {
         }
       }
 
+      // ── 최신기사: #skin-10, 중복 URL 제거 후 10개 ──
+      const latestContainer = document.querySelector("#skin-10");
+      if (latestContainer) {
+        const latestSeen = new Set(results.map(r => r.url));
+        const links = latestContainer.querySelectorAll("a[href]");
+        for (const a of Array.from(links)) {
+          const link = extractLink(a);
+          if (link && !latestSeen.has(link.url)) {
+            latestSeen.add(link.url);
+            results.push({ ...link, section: "latest" });
+            if (results.filter(r => r.section === "latest").length >= 10) break;
+          }
+        }
+      }
+
       return results;
     });
 
     const headlineCount = articles.filter(a => a.section === "headline").length;
     const popularCount = articles.filter(a => a.section === "popular").length;
-    console.log(`[Scraper] Found: ${headlineCount} headlines, ${popularCount} popular articles`);
+    const latestCount = articles.filter(a => a.section === "latest").length;
+    console.log(`[Scraper] Found: ${headlineCount} headlines, ${popularCount} popular, ${latestCount} latest articles`);
 
     if (articles.length === 0) {
       console.warn("[Scraper] No articles found. Run /api/debug-html to inspect the page structure.");
@@ -125,17 +141,21 @@ export async function scrapeLatestNews(): Promise<number> {
 
     for (const article of [...newArticles].reverse()) {
       try {
-        const content = await fetchArticleContent(context, article.url);
+        const { content, published_at: articlePublishedAt } = await fetchArticleContent(context, article.url);
         const now = new Date().toISOString();
 
         const newArticle: Omit<Article, "id"> = {
           title: article.title,
           url: article.url,
-          category: article.category ?? (article.section === "popular" ? "인기기사" : "헤드라인"),
+          category: article.category ?? (
+            article.section === "popular" ? "인기기사" :
+            article.section === "latest" ? "최신기사" :
+            "헤드라인"
+          ),
           content,
           summary: null,
           keywords: null,
-          published_at: article.published_at,
+          published_at: articlePublishedAt || article.published_at,
           fetched_at: now,
         };
 
@@ -159,6 +179,81 @@ export async function scrapeLatestNews(): Promise<number> {
 
   console.log(`[Scraper] Done. ${newCount} new articles saved.`);
   return newCount;
+}
+
+/** 테스트용: 헤드라인 첫 번째 기사 1개만 수집·요약 */
+export async function scrapeTestArticle(): Promise<number> {
+  console.log("[ScraperTest] Starting single headline test...");
+
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    locale: "ko-KR",
+  });
+
+  try {
+    const page = await context.newPage();
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(2000);
+
+    const article = await page.evaluate(() => {
+      function extractLink(el: Element): { title: string; url: string; published_at: string | null } | null {
+        const a = (el.tagName === "A" ? el : el.querySelector("a")) as HTMLAnchorElement | null;
+        if (!a) return null;
+        const href = a.href;
+        if (!href || !href.includes("aitimes.com")) return null;
+        const isArticle = href.includes("/news/") || href.includes("articleView") || href.includes("/article/");
+        if (!isArticle) return null;
+        const titleEl = el.querySelector("h2, h3, h4, .title, .tit, strong, b") || a;
+        const title = (titleEl?.textContent || a.textContent || "").trim();
+        if (!title || title.length < 5) return null;
+        const dateEl = el.querySelector("time, .date, .time, [class*='date'], [class*='time']");
+        const published_at = dateEl?.getAttribute("datetime") || dateEl?.textContent?.trim() || null;
+        return { title, url: href, published_at };
+      }
+
+      const container = document.querySelector("#skin-1");
+      if (!container) return null;
+      for (const a of Array.from(container.querySelectorAll("a[href]"))) {
+        const link = extractLink(a);
+        if (link) return link;
+      }
+      return null;
+    });
+
+    if (!article) {
+      console.warn("[ScraperTest] No article found.");
+      return 0;
+    }
+
+    console.log(`[ScraperTest] Found: ${article.title.slice(0, 50)}`);
+    const { content, published_at: articlePublishedAt } = await fetchArticleContent(context, article.url);
+    const now = new Date().toISOString();
+
+    const newArticle: Omit<import("@/types").Article, "id"> = {
+      title: article.title,
+      url: article.url,
+      category: "헤드라인",
+      content,
+      summary: null,
+      keywords: null,
+      published_at: articlePublishedAt || article.published_at,
+      fetched_at: now,
+    };
+
+    insertArticle(newArticle);
+
+    if (content && content.length > 100) {
+      const { summary, keywords } = await summarizeArticle(article.title, content);
+      updateSummary(article.url, summary, keywords);
+    }
+
+    console.log("[ScraperTest] Done. 1 article saved.");
+    return 1;
+  } finally {
+    await browser.close();
+  }
 }
 
 /** 디버그용: 메인 페이지 HTML과 섹션 구조를 data/debug.html 에 저장 */
@@ -213,13 +308,31 @@ export async function debugPageStructure(): Promise<string> {
   }
 }
 
-async function fetchArticleContent(context: BrowserContext, url: string): Promise<string> {
+async function fetchArticleContent(context: BrowserContext, url: string): Promise<{ content: string; published_at: string | null }> {
   const page = await context.newPage();
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(1000);
 
-    const content = await page.evaluate(() => {
+    const result = await page.evaluate(() => {
+      // published_at 추출: "입력 YYYY.MM.DD HH:MM" 패턴을 페이지 전체 텍스트에서 탐색
+      let published_at: string | null = null;
+      const inputPattern = /입력\s*(\d{4}\.\d{2}\.\d{2})\s+(\d{2}:\d{2})/;
+      const pageText = document.body.innerText || "";
+      const inputMatch = pageText.match(inputPattern);
+      if (inputMatch) {
+        published_at = `${inputMatch[1]} ${inputMatch[2]}`;
+      } else {
+        // fallback: time[datetime] 속성
+        const timeEl = document.querySelector("time[datetime]");
+        if (timeEl) {
+          const dt = timeEl.getAttribute("datetime") || "";
+          const m = dt.match(/(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+          if (m) published_at = `${m[1].replace(/-/g, ".")} ${m[2]}`;
+        }
+      }
+
+      // 본문 추출
       const selectors = [
         ".article-body",
         ".article-content",
@@ -237,20 +350,20 @@ async function fetchArticleContent(context: BrowserContext, url: string): Promis
         if (el) {
           el.querySelectorAll("script, style, .ad, .advertisement, .related, .share, figure").forEach((e) => e.remove());
           const text = el.textContent?.trim() || "";
-          if (text.length > 200) return text;
+          if (text.length > 200) return { content: text, published_at };
         }
       }
 
       const article = document.querySelector("article");
       if (article) {
         article.querySelectorAll("script, style, .ad, nav, header, footer").forEach((e) => e.remove());
-        return article.textContent?.trim() || "";
+        return { content: article.textContent?.trim() || "", published_at };
       }
 
-      return "";
+      return { content: "", published_at };
     });
 
-    return content.slice(0, 5000);
+    return { content: result.content.slice(0, 5000), published_at: result.published_at };
   } finally {
     await page.close();
   }
