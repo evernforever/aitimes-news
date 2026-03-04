@@ -11,7 +11,7 @@ export default function ArticlePage() {
   const [loading, setLoading] = useState(true);
 
   // 텍스트 선택 팝업
-  const [popup, setPopup] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [popup, setPopup] = useState<{ x: number; y: number; text: string; isTouch: boolean } | null>(null);
 
   // 설명 모달
   const [modal, setModal] = useState<{ text: string; explanation: string; loading: boolean } | null>(null);
@@ -25,41 +25,52 @@ export default function ArticlePage() {
       .finally(() => setLoading(false));
   }, [params.id]);
 
-  // 텍스트 드래그 감지
+  // 텍스트 선택 후 팝업 표시 (iOS: selectionchange, Android: touchend, 데스크탑: mouseup)
   useEffect(() => {
-    const handleMouseUp = (e: MouseEvent) => {
-      // 팝업 버튼 클릭 시에는 무시 (handleAskClaude가 처리)
-      if ((e.target as HTMLElement).closest("#ask-claude-popup")) return;
+    let timer: ReturnType<typeof setTimeout>;
 
-      const selection = window.getSelection();
-      const text = selection?.toString().trim();
+    const showPopup = (isTouch: boolean) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const selection = window.getSelection();
+        const text = selection?.toString().trim();
 
-      if (!text || text.length < 2) {
-        setPopup(null);
-        return;
-      }
+        if (!text || text.length < 2) {
+          setPopup(null);
+          return;
+        }
 
-      // 기사 영역 내에서만 팝업 표시
-      if (!articleRef.current?.contains(e.target as Node)) {
-        setPopup(null);
-        return;
-      }
+        const anchorNode = selection?.anchorNode;
+        if (!articleRef.current?.contains(anchorNode as Node)) {
+          setPopup(null);
+          return;
+        }
 
-      setPopup({ x: e.clientX, y: e.clientY, text });
+        const range = selection?.getRangeAt(0);
+        const rect = range?.getBoundingClientRect();
+        // 모바일: 선택 영역 오른쪽 아래, 데스크탑: 선택 영역 위 가운데
+        const x = rect ? (isTouch ? rect.right : rect.left + rect.width / 2) : 0;
+        const y = rect ? (isTouch ? rect.bottom : rect.top) : 0;
+
+        setPopup({ x, y, text, isTouch });
+      }, isTouch ? 300 : 200);
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest("#ask-claude-popup")) {
-        setPopup(null);
-      }
+    const handleSelectionChange = () => showPopup(navigator.maxTouchPoints > 0);
+    const handleTouchEnd = () => showPopup(true);
+    const handleMouseUp = () => {
+      if (navigator.maxTouchPoints > 0) return;
+      showPopup(false);
     };
 
+    document.addEventListener("selectionchange", handleSelectionChange);
+    document.addEventListener("touchend", handleTouchEnd);
     document.addEventListener("mouseup", handleMouseUp);
-    document.addEventListener("mousedown", handleMouseDown);
     return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+      document.removeEventListener("touchend", handleTouchEnd);
       document.removeEventListener("mouseup", handleMouseUp);
-      document.removeEventListener("mousedown", handleMouseDown);
+      clearTimeout(timer);
     };
   }, []);
 
@@ -193,12 +204,17 @@ export default function ArticlePage() {
           id="ask-claude-popup"
           style={{
             position: "fixed",
-            top: popup.y - 48,
-            left: popup.x - 60,
+            top: popup.isTouch ? popup.y + 8 : popup.y - 48,
+            left: popup.isTouch
+              ? Math.max(8, Math.min(popup.x, window.innerWidth - 130))
+              : Math.max(8, Math.min(popup.x, window.innerWidth - 8)),
+            transform: popup.isTouch ? "none" : "translateX(-50%)",
             zIndex: 50,
           }}
         >
           <button
+            onMouseDown={(e) => e.preventDefault()}
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleAskClaude(); }}
             onClick={handleAskClaude}
             className="flex items-center gap-1.5 bg-gray-900 hover:bg-gray-700 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg whitespace-nowrap transition-colors"
           >

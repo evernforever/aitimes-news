@@ -14,45 +14,59 @@ export default function Home() {
   const [categoryLoading, setCategoryLoading] = useState<string | null>(null);
 
   // 텍스트 선택 팝업
-  const [popup, setPopup] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [popup, setPopup] = useState<{ x: number; y: number; text: string; isTouch: boolean } | null>(null);
 
   // 설명 모달
   const [modal, setModal] = useState<{ text: string; explanation: string; loading: boolean } | null>(null);
 
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // 텍스트 드래그 감지
+  // 텍스트 선택 후 팝업 표시 (iOS: selectionchange, Android: touchend, 데스크탑: mouseup)
   useEffect(() => {
-    const handleMouseUp = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest("#ask-claude-popup")) return;
+    let timer: ReturnType<typeof setTimeout>;
 
-      const selection = window.getSelection();
-      const text = selection?.toString().trim();
+    const showPopup = (isTouch: boolean) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const selection = window.getSelection();
+        const text = selection?.toString().trim();
 
-      if (!text || text.length < 2) {
-        setPopup(null);
-        return;
-      }
+        if (!text || text.length < 2) {
+          setPopup(null);
+          return;
+        }
 
-      if (!contentRef.current?.contains(e.target as Node)) {
-        setPopup(null);
-        return;
-      }
+        const anchorNode = selection?.anchorNode;
+        if (!contentRef.current?.contains(anchorNode as Node)) {
+          setPopup(null);
+          return;
+        }
 
-      setPopup({ x: e.clientX, y: e.clientY, text });
+        const range = selection?.getRangeAt(0);
+        const rect = range?.getBoundingClientRect();
+        // 모바일: 선택 영역 오른쪽 아래, 데스크탑: 선택 영역 위 가운데
+        const x = rect ? (isTouch ? rect.right : rect.left + rect.width / 2) : 0;
+        const y = rect ? (isTouch ? rect.bottom : rect.top) : 0;
+
+        setPopup({ x, y, text, isTouch });
+      }, isTouch ? 300 : 200);
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("#ask-claude-popup")) {
-        setPopup(null);
-      }
+    const handleSelectionChange = () => showPopup(navigator.maxTouchPoints > 0);
+    const handleTouchEnd = () => showPopup(true);
+    const handleMouseUp = () => {
+      if (navigator.maxTouchPoints > 0) return;
+      showPopup(false);
     };
 
+    document.addEventListener("selectionchange", handleSelectionChange);
+    document.addEventListener("touchend", handleTouchEnd);
     document.addEventListener("mouseup", handleMouseUp);
-    document.addEventListener("mousedown", handleMouseDown);
     return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+      document.removeEventListener("touchend", handleTouchEnd);
       document.removeEventListener("mouseup", handleMouseUp);
-      document.removeEventListener("mousedown", handleMouseDown);
+      clearTimeout(timer);
     };
   }, []);
 
@@ -236,23 +250,23 @@ export default function Home() {
 
   return (
     <>
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-6 sm:py-8">
       {/* 헤더 */}
-      <header className="mb-8">
-        <div className="flex items-center justify-between">
+      <header className="mb-6 sm:mb-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
               AI Times 뉴스 요약
             </h1>
             <p className="text-gray-500 mt-1 text-sm">
               Claude AI가 최신 AI 뉴스를 요약해드립니다
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex gap-2">
             <button
               onClick={handleReset}
               disabled={scraping || resetting}
-              className="flex items-center gap-2 bg-gray-100 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 text-gray-600 border border-gray-300 hover:border-red-300 px-4 py-2 rounded-lg font-medium transition-colors text-sm"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-gray-100 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 text-gray-600 border border-gray-300 hover:border-red-300 px-4 py-2 rounded-lg font-medium transition-colors text-sm"
             >
               {resetting ? (
                 <>
@@ -263,13 +277,13 @@ export default function Home() {
                   초기화 중...
                 </>
               ) : (
-                "초기화 후 재수집"
+                "초기화"
               )}
             </button>
             <button
               onClick={handleScrape}
               disabled={scraping || resetting}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm"
             >
               {scraping ? (
                 <>
@@ -280,7 +294,7 @@ export default function Home() {
                   수집 중...
                 </>
               ) : (
-                "지금 뉴스 수집"
+                "새로고침"
               )}
             </button>
           </div>
@@ -391,12 +405,17 @@ export default function Home() {
         id="ask-claude-popup"
         style={{
           position: "fixed",
-          top: popup.y - 48,
-          left: popup.x - 60,
+          top: popup.isTouch ? popup.y + 8 : popup.y - 48,
+          left: popup.isTouch
+            ? Math.max(8, Math.min(popup.x, window.innerWidth - 130))
+            : Math.max(8, Math.min(popup.x, window.innerWidth - 8)),
+          transform: popup.isTouch ? "none" : "translateX(-50%)",
           zIndex: 50,
         }}
       >
         <button
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleAskClaude(); }}
           onClick={handleAskClaude}
           className="flex items-center gap-1.5 bg-gray-900 hover:bg-gray-700 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg whitespace-nowrap transition-colors"
         >
